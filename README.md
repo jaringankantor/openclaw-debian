@@ -29,7 +29,7 @@ Set konfigurasi gateway untuk mode lokal dan akses dashboard dari browser:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint node openclaw-gateway \
-  dist/index.js config set --batch-json '[{"path":"gateway.mode","value":"local"},{"path":"gateway.bind","value":"lan"},{"path":"gateway.controlUi.allowedOrigins","value":["http://localhost:18789","http://127.0.0.1:18789","http://10.252.23.8:18789"]}]'
+  dist/index.js config set --batch-json '[{"path":"gateway.mode","value":"local"},{"path":"gateway.bind","value":"lan"},{"path":"gateway.controlUi.allowInsecureAuth","value":true},{"path":"gateway.controlUi.allowedOrigins","value":["http://localhost:18789","http://127.0.0.1:18789"]}]'
 ```
 
 Jalankan gateway:
@@ -43,7 +43,7 @@ docker compose up -d
 Buka:
 
 ```text
-http://10.252.23.8:18789
+http://127.0.0.1:18789
 ```
 
 Port dashboard dipetakan dari container ke host lewat konfigurasi:
@@ -52,6 +52,18 @@ Port dashboard dipetakan dari container ke host lewat konfigurasi:
 ports:
   - "18789:18789"
 ```
+
+Jika membuka dashboard dari mesin lain lewat IP LAN, browser akan melihatnya sebagai plain HTTP remote origin, misalnya:
+
+```text
+http://10.252.23.8:18789
+```
+
+OpenClaw membutuhkan secure browser context untuk membuat device identity. Gunakan salah satu opsi berikut:
+
+- Buka `http://127.0.0.1:18789` langsung dari host yang menjalankan gateway.
+- Gunakan HTTPS, misalnya lewat Tailscale Serve atau reverse proxy TLS.
+- Untuk akses sementara yang hanya mengandalkan token lokal, aktifkan `gateway.controlUi.allowInsecureAuth: true`. Jangan gunakan opsi ini untuk akses remote HTTP yang terbuka.
 
 ## Perintah Harian
 
@@ -138,6 +150,36 @@ Jika port `18789` sudah dipakai proses lain di host, ubah mapping port di `docke
 
 ```bash
 docker compose up -d
+```
+
+### Secure Browser Context Required
+
+Jika muncul error:
+
+```text
+Secure browser context required
+This page is running over plain HTTP, so the browser cannot create the device identity the Gateway expects.
+```
+
+Penyebabnya biasanya dashboard dibuka dari IP LAN seperti `http://10.252.23.8:18789`. Browser hanya menganggap `localhost`/`127.0.0.1` atau HTTPS sebagai secure context.
+
+Solusi yang disarankan:
+
+```text
+http://127.0.0.1:18789
+```
+
+Jika harus dibuka dari perangkat lain, gunakan HTTPS. Jika hanya untuk kompatibilitas lokal dan paham risikonya, jalankan:
+
+```bash
+docker compose run --rm --no-deps --entrypoint node openclaw-gateway \
+  dist/index.js config set --batch-json '[{"path":"gateway.controlUi.allowInsecureAuth","value":true},{"path":"gateway.controlUi.allowedOrigins","value":["http://localhost:18789","http://127.0.0.1:18789","http://10.252.23.8:18789"]}]'
+```
+
+Lalu restart gateway:
+
+```bash
+docker compose restart openclaw-gateway
 ```
 
 ## Catatan Keamanan

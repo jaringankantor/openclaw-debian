@@ -29,7 +29,7 @@ Set konfigurasi gateway untuk mode lokal dan akses dashboard dari browser:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint node openclaw-gateway \
-  dist/index.js config set --batch-json '[{"path":"gateway.mode","value":"local"},{"path":"gateway.bind","value":"lan"},{"path":"gateway.controlUi.allowedOrigins","value":["http://localhost:18789","http://127.0.0.1:18789"]}]'
+  dist/index.js config set --batch-json '[{"path":"gateway.mode","value":"local"},{"path":"gateway.bind","value":"lan"},{"path":"gateway.controlUi.allowedOrigins","value":["http://localhost:18789","http://127.0.0.1:18789","http://10.252.23.8:18789"]}]'
 ```
 
 Jalankan gateway:
@@ -43,7 +43,7 @@ docker compose up -d
 Buka:
 
 ```text
-http://127.0.0.1:18789
+http://10.252.23.8:18789
 ```
 
 Port dashboard dipetakan dari container ke host lewat konfigurasi:

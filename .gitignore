@@ -170,13 +170,12 @@ obj/
 
 # Environment & Secrets (IMPORTANT: Never commit real secrets)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 *.pem
 *.key
 secrets/
 credentials.json
-*.env
 
 # OpenClaw runtime data and backups
 data/

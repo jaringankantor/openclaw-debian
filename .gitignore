@@ -178,6 +178,10 @@ secrets/
 credentials.json
 *.env
 
+# OpenClaw runtime data and backups
+data/
+backup/
+
 # Temporary files
 tmp/
 temp/

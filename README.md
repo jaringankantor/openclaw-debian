@@ -16,6 +16,29 @@ Setup Docker Compose untuk menjalankan OpenClaw Gateway dan CLI di Debian.
 
 Pastikan `.env` berisi konfigurasi yang dibutuhkan OpenClaw, misalnya token gateway dan API key provider yang dipakai.
 
+Variabel yang didukung oleh `docker-compose.yml`:
+
+| Variabel | Default | Keterangan |
+| --- | --- | --- |
+| `OPENCLAW_GATEWAY_TOKEN` | wajib diisi | Token autentikasi gateway |
+| `OPENCLAW_IMAGE` | `ghcr.io/openclaw/openclaw:latest` | Image atau versi OpenClaw |
+| `OPENCLAW_GATEWAY_BIND` | `lan` | Interface tempat gateway mendengarkan |
+| `OPENCLAW_GATEWAY_PORT` | `18789` | Port dashboard pada host |
+| `OPENCLAW_STATE_PATH` | `./data/openclaw` | Lokasi state, konfigurasi, dan workspace |
+| `OPENCLAW_AUTH_PATH` | `./data/auth` | Lokasi data autentikasi tambahan |
+| `TZ` | `Asia/Jakarta` | Zona waktu container |
+| `OPENCLAW_TZ` | `Asia/Jakarta` | Zona waktu yang digunakan OpenClaw |
+| `XAI_API_KEY` | kosong | API key xAI, jika digunakan |
+| `DEEPSEEK_API_KEY` | kosong | API key DeepSeek, jika digunakan |
+
+Contoh minimal `.env`:
+
+```dotenv
+OPENCLAW_GATEWAY_TOKEN=ganti-dengan-token-yang-kuat
+TZ=Asia/Jakarta
+OPENCLAW_TZ=Asia/Jakarta
+```
+
 ## Setup Pertama Kali
 
 Jalankan onboarding OpenClaw:
@@ -50,8 +73,11 @@ Port dashboard dipetakan dari container ke host lewat konfigurasi:
 
 ```yaml
 ports:
-  - "18789:18789"
+  - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
 ```
+
+Jika `OPENCLAW_GATEWAY_PORT` diubah di `.env`, gunakan port tersebut pada URL
+dashboard.
 
 Jika membuka dashboard dari mesin lain lewat IP LAN, browser akan melihatnya sebagai plain HTTP remote origin, misalnya:
 
@@ -103,28 +129,240 @@ Stop semua service:
 docker compose down
 ```
 
-## Update Image
+## DeepSeek Provider
 
-Ambil image terbaru:
+Karena OpenClaw berjalan lewat Docker Compose, jalankan perintah `openclaw` melalui service `openclaw-cli`.
 
-```bash
-docker compose pull
-```
-
-Jalankan ulang container:
+Pastikan gateway sudah berjalan:
 
 ```bash
 docker compose up -d
 ```
 
+Install plugin DeepSeek:
+
+```bash
+docker compose run --rm openclaw-cli plugins install @openclaw/deepseek-provider
+```
+
+Restart gateway:
+
+```bash
+docker compose restart openclaw-gateway
+```
+
+Jalankan onboarding dengan pilihan DeepSeek API key:
+
+```bash
+docker compose run --rm openclaw-cli onboard --auth-choice deepseek-api-key
+```
+
+Jika perintah dokumentasi OpenClaw menyebut:
+
+```bash
+openclaw gateway restart
+```
+
+Untuk setup Docker Compose ini gunakan:
+
+```bash
+docker compose restart openclaw-gateway
+```
+
+## Menautkan Nomor WhatsApp
+
+OpenClaw menautkan WhatsApp sebagai perangkat tertaut melalui WhatsApp Web.
+Nomor yang direkomendasikan adalah nomor khusus untuk asisten, meskipun nomor
+pribadi tetap dapat digunakan. Session dan kredensial WhatsApp disimpan di
+`${OPENCLAW_STATE_PATH:-./data/openclaw}` pada host.
+
+Pastikan gateway berjalan:
+
+```bash
+docker compose up -d
+```
+
+Install plugin WhatsApp jika belum tersedia:
+
+```bash
+docker compose run --rm openclaw-cli \
+  plugins install clawhub:@openclaw/whatsapp
+```
+
+Mulai login interaktif untuk session/account `default`:
+
+```bash
+docker compose run --rm openclaw-cli \
+  channels login --channel whatsapp --account default
+```
+
+Setelah QR muncul di terminal:
+
+1. Buka WhatsApp pada ponsel dengan nomor yang akan dipakai OpenClaw.
+2. Pilih **Perangkat tertaut** atau **Linked devices**.
+3. Pilih **Tautkan perangkat** atau **Link a device**.
+4. Pindai QR dari terminal dan tunggu sampai login selesai.
+
+QR memiliki masa berlaku singkat. Jika kedaluwarsa, jalankan kembali perintah
+login untuk membuat QR baru.
+
+Restart gateway agar listener memakai session yang baru ditautkan:
+
+```bash
+docker compose restart openclaw-gateway
+```
+
+Periksa status channel:
+
+```bash
+docker compose run --rm openclaw-cli channels status
+docker compose logs --tail=100 openclaw-gateway
+```
+
+Secara default, pesan langsung dari nomor baru memakai kebijakan pairing. Kirim
+pesan ke nomor WhatsApp OpenClaw, lalu lihat dan setujui permintaan pairing:
+
+```bash
+docker compose run --rm openclaw-cli pairing list whatsapp
+docker compose run --rm openclaw-cli pairing approve whatsapp <CODE>
+```
+
+Ganti `<CODE>` dengan kode yang ditampilkan oleh perintah `pairing list`.
+Permintaan pairing berlaku selama satu jam.
+
+Untuk menautkan nomor tambahan, gunakan nama account yang berbeda, misalnya
+`work`:
+
+```bash
+docker compose run --rm openclaw-cli \
+  channels login --channel whatsapp --account work
+```
+
+Untuk melepas session tertentu:
+
+```bash
+docker compose run --rm openclaw-cli \
+  channels logout --channel whatsapp --account default
+```
+
+Jangan menjalankan login berulang kali jika channel sudah tersambung karena hal
+tersebut dapat menimbulkan konflik session WhatsApp. Cek status terlebih dahulu.
+
+## Backup dan Restore
+
+State aktif berada di `./data/openclaw` dan data autentikasi tambahan berada di
+`./data/auth`, kecuali lokasinya diubah melalui `.env`. Hentikan gateway sebelum
+menyalin data agar backup konsisten.
+
+### Membuat backup
+
+Buat nama direktori backup, misalnya `openclaw-YYYYMMDD-HHMMSS`, lalu jalankan:
+
+```bash
+docker compose stop openclaw-gateway
+sudo mkdir -p backup/openclaw-YYYYMMDD-HHMMSS/openclaw
+sudo mkdir -p backup/openclaw-YYYYMMDD-HHMMSS/auth
+sudo cp -a data/openclaw/. backup/openclaw-YYYYMMDD-HHMMSS/openclaw/
+sudo cp -a data/auth/. backup/openclaw-YYYYMMDD-HHMMSS/auth/
+docker compose start openclaw-gateway
+```
+
+Ganti `YYYYMMDD-HHMMSS` dengan waktu pembuatan backup. Simpan direktori backup
+secara privat karena dapat berisi token, session channel, identitas perangkat,
+dan kredensial.
+
+### Restore state
+
+Contoh berikut mempertahankan state aktif sebagai rollback sebelum memasang
+backup. Ganti `<BACKUP_NAME>` dengan nama direktori backup yang akan digunakan:
+
+```bash
+docker compose down
+sudo mv data/openclaw data/openclaw.before-restore-YYYYMMDD-HHMMSS
+sudo mv data/auth data/auth.before-restore-YYYYMMDD-HHMMSS
+sudo mkdir -p data/openclaw data/auth
+sudo cp -a backup/<BACKUP_NAME>/openclaw/. data/openclaw/
+sudo cp -a backup/<BACKUP_NAME>/auth/. data/auth/
+docker compose up -d
+```
+
+Jika backup lama hanya berisi isi state secara langsung—misalnya terdapat
+`openclaw.json`, `workspace`, dan `credentials` tepat di bawah direktori
+backup—pertahankan `data/auth` yang aktif dan restore state dengan urutan
+berikut:
+
+```bash
+docker compose down
+sudo mv data/openclaw data/openclaw.before-restore-YYYYMMDD-HHMMSS
+sudo mkdir -p data/openclaw
+sudo cp -a backup/<BACKUP_NAME>/. data/openclaw/
+docker compose up -d
+```
+
+Setelah restore, verifikasi gateway dan channel:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 openclaw-gateway
+docker compose run --rm openclaw-cli channels status
+```
+
+Direktori `data/*.before-restore-YYYYMMDD-HHMMSS` dapat dipakai untuk rollback.
+Jangan menghapusnya sebelum konfigurasi, workspace, plugin, dan channel pada
+hasil restore sudah dipastikan berfungsi.
+
+## Upgrade OpenClaw
+
+Jalankan perintah berikut dari root project:
+
+```bash
+cd /root/docker/openclaw-debian
+docker compose pull
+docker compose up -d
+```
+
+`docker compose pull` mengambil versi terbaru dari image yang ditentukan oleh
+`OPENCLAW_IMAGE` (default `ghcr.io/openclaw/openclaw:latest`). Perintah
+`docker compose up -d` kemudian membuat ulang container jika image berubah.
+
+Verifikasi bahwa gateway kembali sehat:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 openclaw-gateway
+```
+
+Konfigurasi, autentikasi, dan workspace tetap tersimpan pada direktori host yang
+ditentukan oleh `OPENCLAW_STATE_PATH` dan `OPENCLAW_AUTH_PATH`, sehingga tidak
+hilang saat container dibuat ulang.
+
+> Jangan menghapus direktori state atau auth ketika melakukan upgrade. Buat
+> backup terlebih dahulu sebelum mengubah lokasi kedua direktori tersebut.
+
+Setelah memastikan versi baru berjalan dengan baik, image lama yang tidak lagi
+digunakan dapat dibersihkan secara opsional:
+
+```bash
+docker image prune
+```
+
 ## Data Persisten
 
-State dan konfigurasi OpenClaw disimpan di Docker volume:
+Data OpenClaw menggunakan bind mount agar mudah dicadangkan dari host:
 
-- `openclaw_state` -> `/home/node/.openclaw`
-- `openclaw_auth` -> `/home/node/.config/openclaw`
+| Lokasi host | Lokasi container | Isi |
+| --- | --- | --- |
+| `${OPENCLAW_STATE_PATH:-./data/openclaw}` | `/home/node/.openclaw` | Konfigurasi, workspace, plugin, dan session channel |
+| `${OPENCLAW_AUTH_PATH:-./data/auth}` | `/home/node/.config/openclaw` | Data autentikasi tambahan |
 
-`docker compose down` tidak menghapus volume tersebut. Jika benar-benar ingin reset state, hapus volume secara manual setelah memastikan tidak ada data penting yang masih dibutuhkan.
+`docker compose down` maupun pembuatan ulang container tidak menghapus kedua
+direktori tersebut. Jangan menghapusnya kecuali memang ingin mereset OpenClaw
+dan sudah membuat backup data yang diperlukan.
+
+Sebagian file mungkin dimiliki oleh UID pengguna di dalam container sehingga
+perintah host biasa menampilkan `Permission denied`. Gunakan `sudo` hanya untuk
+operasi backup, restore, atau pemeriksaan file yang memang diperlukan; jangan
+mengubah permission secara rekursif ketika gateway sedang berjalan.
 
 ## Troubleshooting
 
@@ -146,7 +384,13 @@ Jika konfigurasi berubah tetapi belum terbaca, restart gateway:
 docker compose restart openclaw-gateway
 ```
 
-Jika port `18789` sudah dipakai proses lain di host, ubah mapping port di `docker-compose.yml`, lalu jalankan ulang:
+Jika port `18789` sudah dipakai proses lain, set port lain di `.env`, misalnya:
+
+```dotenv
+OPENCLAW_GATEWAY_PORT=18790
+```
+
+Lalu jalankan ulang:
 
 ```bash
 docker compose up -d

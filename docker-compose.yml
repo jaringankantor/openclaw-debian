@@ -109,3 +109,18 @@ services:
     depends_on:
       openclaw-gateway:
         condition: service_started
+
+  opencode-adapter:
+    build:
+      context: ./opencode-adapter
+
+    restart: unless-stopped
+
+    env_file:
+      - .env.opencodeadapter
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    ports:
+      - "127.0.0.1:4091:4091"

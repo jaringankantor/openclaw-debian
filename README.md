@@ -6,7 +6,10 @@ Setup Docker Compose untuk menjalankan OpenClaw Gateway dan CLI di Debian.
 
 - `docker-compose.yml` - konfigurasi service `openclaw-gateway` dan `openclaw-cli`
 - `.env` - environment lokal untuk token/API key, tidak untuk dicommit
+- `.env.opencodeadapter` - kredensial OpenCode Server untuk service adapter, tidak untuk dicommit
+- `opencode-adapter/` - adapter API OpenAI-compatible untuk OpenCode Server
 - `enkripsi.env` - contoh/arsip environment terenkripsi SOPS
+- `enkripsi.env.opencodeadapter` - arsip SOPS untuk environment adapter
 
 ## Prasyarat
 
@@ -168,6 +171,175 @@ Untuk setup Docker Compose ini gunakan:
 ```bash
 docker compose restart openclaw-gateway
 ```
+
+## OpenCode Server dan Adapter
+
+OpenCode Server menggunakan API session sendiri, bukan API provider model
+OpenAI-compatible. Service `opencode-adapter` menerjemahkan API tersebut menjadi
+endpoint `/v1/models` dan `/v1/chat/completions` agar OpenClaw dapat memakai
+OpenCode sebagai provider `opencode/openclaw`.
+
+```text
+OpenClaw Gateway
+    -> http://opencode-adapter:4091/v1
+    -> http://host.docker.internal:4090
+    -> OpenCode Server (agent openclaw-consultant)
+```
+
+Port adapter hanya dipublikasikan pada `127.0.0.1:4091` di host. Antar-container
+menggunakan nama service Docker `opencode-adapter:4091`.
+
+### Menjalankan OpenCode Server
+
+OpenCode pada host harus mendengarkan pada interface yang dapat dijangkau dari
+container, bukan hanya `127.0.0.1`:
+
+```bash
+OPENCODE_SERVER_USERNAME='opencode_anwar' \
+OPENCODE_SERVER_PASSWORD='ganti-dengan-password-yang-kuat' \
+opencode serve --hostname 0.0.0.0 --port 4090
+```
+
+Batasi akses port `4090` melalui firewall karena bind `0.0.0.0` dapat membuat
+service dapat diakses dari jaringan lain. Jangan commit kredensial ke repository.
+
+### Environment adapter
+
+Buat `.env.opencodeadapter` dengan isi berikut:
+
+```dotenv
+PORT=4091
+OPENCODE_URL=http://host.docker.internal:4090
+OPENCODE_USERNAME=opencode_anwar
+OPENCODE_PASSWORD=ganti-dengan-password-yang-kuat
+OPENCODE_AGENT=openclaw-consultant
+```
+
+File `.env.opencodeadapter` dicakup pola `.env.*` pada `.gitignore` sehingga
+kredensial tidak ikut ter-commit.
+
+### Build dan menjalankan adapter
+
+Build dan jalankan seluruh service:
+
+```bash
+docker compose up -d --build
+```
+
+Atau hanya build dan jalankan adapter:
+
+```bash
+docker compose up -d --build opencode-adapter
+```
+
+Periksa status dan log:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 opencode-adapter
+```
+
+Tes health adapter dari host:
+
+```bash
+curl http://127.0.0.1:4091/health
+curl http://127.0.0.1:4091/v1/models
+```
+
+Tes jalur yang dipakai gateway dari jaringan Docker:
+
+```bash
+docker compose exec openclaw-gateway node -e \
+  "fetch('http://opencode-adapter:4091/health').then(async response => console.log(response.status, await response.text())).catch(console.error)"
+```
+
+Respons health yang benar memiliki nilai `healthy: true`, upstream
+`http://host.docker.internal:4090`, dan agent `openclaw-consultant`.
+
+### Provider OpenClaw
+
+Provider yang tersimpan di konfigurasi OpenClaw menggunakan nilai utama berikut:
+
+```json
+{
+  "models": {
+    "providers": {
+      "opencode": {
+        "baseUrl": "http://opencode-adapter:4091/v1",
+        "apiKey": "local-adapter",
+        "api": "openai-completions",
+        "timeoutSeconds": 300,
+        "models": [
+          {
+            "id": "openclaw",
+            "name": "OpenCode",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 128000,
+            "maxTokens": 16384,
+            "api": "openai-completions"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+`apiKey` hanya merupakan nilai placeholder karena adapter saat ini tidak
+memvalidasi Bearer token. Basic Auth ke OpenCode Server tetap berada di
+`.env.opencodeadapter`.
+
+Verifikasi dan pilih model:
+
+```bash
+docker compose run --rm openclaw-cli config get models.providers.opencode
+docker compose run --rm openclaw-cli models list --provider opencode --all
+docker compose run --rm openclaw-cli models set opencode/openclaw
+docker compose restart openclaw-gateway
+```
+
+Adapter membuat session OpenCode baru untuk setiap request chat. Streaming
+didukung dalam format SSE, tetapi jawaban upstream dikumpulkan terlebih dahulu
+sebelum dikirim sebagai satu bagian teks. Nilai penggunaan token dikembalikan
+sebagai `0` karena OpenCode Server tidak memberikan statistik token melalui
+respons yang dipakai adapter.
+
+### Plugin OpenCode Consult
+
+Plugin lokal `opencode-consult` tetap tersedia sebagai jalur terpisah untuk
+konsultasi coding read-only. Plugin menyediakan tool `opencode_consult`; OpenCode
+memberikan diagnosis dan saran, sedangkan OpenClaw tetap menjadi pelaksana.
+
+Verifikasi plugin:
+
+```bash
+docker compose run --rm openclaw-cli plugins info opencode-consult
+docker compose run --rm openclaw-cli config get plugins.entries.opencode-consult
+```
+
+Contoh permintaan:
+
+```text
+Gunakan opencode_consult untuk menganalisis penyebab test ini gagal. Jangan ubah
+file sebelum hasil konsultasi ditinjau.
+```
+
+Jika adapter menampilkan `ECONNREFUSED`, periksa listener upstream:
+
+```bash
+ss -ltnp | grep ':4090'
+```
+
+Listener harus terlihat pada `0.0.0.0:4090`. HTTP `401` menunjukkan kredensial
+OpenCode tidak sesuai. Error agent tidak ditemukan menunjukkan nilai
+`OPENCODE_AGENT` tidak tersedia pada OpenCode Server.
 
 ## Menautkan Nomor WhatsApp
 

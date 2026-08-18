@@ -195,6 +195,13 @@ OpenCode pada host harus mendengarkan pada interface yang dapat dijangkau dari
 container, bukan hanya `127.0.0.1`:
 
 ```bash
+opencode serve --hostname 0.0.0.0 --port 4090
+```
+
+Jika OpenCode Server menggunakan autentikasi, jalankan dengan username dan
+password:
+
+```bash
 OPENCODE_SERVER_USERNAME='opencode_anwar' \
 OPENCODE_SERVER_PASSWORD='ganti-dengan-password-yang-kuat' \
 opencode serve --hostname 0.0.0.0 --port 4090
@@ -340,6 +347,67 @@ ss -ltnp | grep ':4090'
 Listener harus terlihat pada `0.0.0.0:4090`. HTTP `401` menunjukkan kredensial
 OpenCode tidak sesuai. Error agent tidak ditemukan menunjukkan nilai
 `OPENCODE_AGENT` tidak tersedia pada OpenCode Server.
+
+## CLIProxyAPI Provider
+
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) dapat digunakan
+sebagai provider OpenAI-compatible. Dari host, API tersedia pada:
+
+```text
+http://127.0.0.1:8317/v1
+```
+
+OpenClaw Gateway berjalan di dalam container, sehingga konfigurasi provider
+harus menggunakan alamat host Docker berikut, bukan `127.0.0.1`:
+
+```text
+http://host.docker.internal:8317/v1
+```
+
+Provider disimpan dengan ID `cliproxy` dan API `openai-completions`. API key
+berasal dari konfigurasi CLIProxyAPI dan disimpan hanya di state lokal
+OpenClaw. Jangan menaruh API key asli di README atau file yang di-commit.
+
+### Melihat daftar model
+
+Lihat seluruh model yang tersedia langsung dari CLIProxyAPI pada host:
+
+```bash
+curl -s http://127.0.0.1:8317/v1/models \
+  -H "Authorization: Bearer <CLIPROXY_API_KEY>" | \
+  jq -r '.data[].id'
+```
+
+Jika `jq` tidak tersedia, tampilkan respons JSON mentah:
+
+```bash
+curl -s http://127.0.0.1:8317/v1/models \
+  -H "Authorization: Bearer <CLIPROXY_API_KEY>"
+```
+
+Lihat model CLIProxyAPI yang sudah didaftarkan pada OpenClaw:
+
+```bash
+docker compose run --rm openclaw-cli config get models.providers.cliproxy
+docker compose run --rm openclaw-cli models list --provider cliproxy --all
+```
+
+Pilih salah satu model, misalnya:
+
+```bash
+docker compose run --rm openclaw-cli models set cliproxy/gpt-5.6-sol
+docker compose restart openclaw-gateway
+```
+
+Tes koneksi CLIProxyAPI dari jaringan container:
+
+```bash
+docker compose exec openclaw-gateway node -e \
+  "fetch('http://host.docker.internal:8317/v1/models',{headers:{Authorization:'Bearer <CLIPROXY_API_KEY>'}}).then(async response => console.log(response.status, await response.text())).catch(console.error)"
+```
+
+Ganti `<CLIPROXY_API_KEY>` hanya saat menjalankan perintah dan hindari
+menyimpannya di shell history.
 
 ## Menautkan Nomor WhatsApp
 

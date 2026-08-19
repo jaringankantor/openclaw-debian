@@ -108,6 +108,32 @@ Lihat log gateway:
 docker compose logs -f openclaw-gateway
 ```
 
+### Mengecek Status Channel WhatsApp
+
+Jalankan probe untuk melihat status seluruh akun WhatsApp:
+
+```bash
+docker compose run --rm openclaw-cli channels status \
+  --channel whatsapp --probe
+```
+
+Perhatikan baris akun yang ingin diperiksa, misalnya akun `default`:
+
+```text
+WhatsApp default: enabled, configured, linked, running, connected, health:healthy
+```
+
+Channel berjalan dengan baik jika statusnya menunjukkan `enabled`, `linked`,
+`running`, `connected`, dan `health:healthy`. Jika muncul `disabled`, `not
+linked`, `stopped`, atau `disconnected`, akun tersebut belum aktif atau belum
+terhubung ke WhatsApp.
+
+Untuk memantau log WhatsApp secara langsung:
+
+```bash
+docker compose logs -f openclaw-gateway | grep --line-buffered -i whatsapp
+```
+
 Jalankan CLI OpenClaw:
 
 ```bash
